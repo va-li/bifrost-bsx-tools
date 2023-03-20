@@ -3,20 +3,28 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "bifrost-bsx-tools"
+name = "bifrost_bsx_tools"
 version = "0.0.1"
 authors = [
   { name="Valentin Bauer", email="valentin.bauer@tuwien.ac.at" },
 ]
-description = "Extract time series from Bifrost BSX files."
+description = "Extract time series from Bifrost BSX files as pandas DataFrame."
 readme = "README.md"
+license = { file = "LICENSE.txt" }
 requires-python = ">=3.7"
 classifiers = [
+    "Development Status :: 3 - Alpha",
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
+dependencies = [
+    "bifrost_common_py",
+    "pandas",
+]
+keywords = ["bifrost", "bsx"]
 
 [project.urls]
 "Homepage" = "https://github.com/vali/bifrost-bsx-tools"
 "Bug Tracker" = "https://github.com/vali/bifrost-bsx-tools/issues"
+"Bifrost" = "http://bifrost.siemens.com"
