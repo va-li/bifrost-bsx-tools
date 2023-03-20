@@ -2,10 +2,12 @@ from pathlib import Path
 import io
 import zipfile as zf
 import json
-from typing import IO, List, Dict, Any, Union
+from typing import IO, List, Dict, Any, Union, Optional
 import warnings
+import functools
 
 # non-standard library imports
+import yaml
 import pandas as pd
 import bifrost_common_py.selectors as select
 from bifrost_common_py.safepointer import safepointer
@@ -14,7 +16,8 @@ class BsxException(Exception):
     pass
 
 class DynamicTimeseriesNotFoundError(BsxException):
-    """Dynamic timeseries not found in BSX archive
+    '''
+    Dynamic timeseries not found in BSX archive
     
     Parameters
     ----------
@@ -22,7 +25,7 @@ class DynamicTimeseriesNotFoundError(BsxException):
         The id of the run that was searched
     dynamic_id : str
         The id of the dynamic that was searched
-    """
+    '''
     
     def __init__(self, run_id: str, dynamic_id: str):
         self.run_id = run_id
@@ -30,7 +33,8 @@ class DynamicTimeseriesNotFoundError(BsxException):
         super().__init__(f"Dynamic timeseries for dynamic {dynamic_id} not found in run {run_id}")
         
 class DynamicTimseriesParsingError(BsxException):
-    """Dynamic timeseries CSV could not be parsed from BSX archive
+    '''
+    Dynamic timeseries CSV could not be parsed from BSX archive
     
     Parameters
     ----------
@@ -38,7 +42,7 @@ class DynamicTimseriesParsingError(BsxException):
         The id of the run that was searched
     dynamic_id : str
         The id of the dynamic that was searched
-    """
+    '''
     
     def __init__(self, run_id: str, dynamic_id: str):
         self.run_id = run_id
@@ -47,94 +51,123 @@ class DynamicTimseriesParsingError(BsxException):
 
 class BsxArchive:
     '''
-    A Bifrost Super Import/Export ZIP archive.
+    A Bifrost Super Import/Export (BSX) ZIP archive.
     
     This class is a wrapper around a zipfile.ZipFile object that provides
     some convenience methods for extracting and parsing the contents of
     a Bifrost Super Import/Export ZIP archive.
     '''
-    def __init__(self, bsx_archive: Union[zf.ZipFile, bytes]):
-        if isinstance(bsx_archive, zf.ZipFile):
+    def __init__(self, bsx_archive: Union[str, zf.ZipFile, bytes]):
+        if isinstance(bsx_archive, str):
+            self.bsx_archive = zf.ZipFile(bsx_archive)
+        elif isinstance(bsx_archive, zf.ZipFile):
             self.bsx_archive = bsx_archive
-        else:
+        elif isinstance(bsx_archive, bytes):
             self.bsx_archive = zf.ZipFile(io.BytesIO(bsx_archive))
-
-        self.state = self._get_state(self.bsx_archive)
-        self.runs_metadata = self._get_all_runs_metadata(self.state)
-        self.dynamics_metadata = self._get_dynamics_metadata_from_state(self.state)
-        self.settlement_id = self._get_settlement_id(self.state)
-    
+        else:
+            raise TypeError(f'bsx_archive must be a string, zipfile.ZipFile or bytes, but is {type(bsx_archive)}')
+        
+        self._state_at_export = self.get_state()
+        
     @staticmethod
-    def from_file(path: Union[str, Path]) -> 'BsxArchive':
+    def _id_to_filesystem_name(id: str) -> str:
+        return id.replace(':', '_')
+        
+    def get_settlement_id(self) -> str:
         '''
-        Creates a BsxArchive from a file.
+        Returns the id of the settlement that was exported.
+        
+        Returns
+        -------
+        str
+            The id of the settlement that was exported.
+        '''
+        return safepointer.get(self._state_at_export, select.settlementName(), '')
+    
+    def get_state(self, run_id:Optional[str]=None) -> Dict[str, Any]:
+        '''
+        Returns the state object, either from a specific run or, when `run_id` is `None`
+        the state of the settlement when the BSX archive was created.
         
         Parameters
         ----------
-        path : Union[str, Path]
-            The path to a BSX ZIP file.
+        run_id : Optional[str], optional
+            The id of the run to get the state for, by default None
+        
+        Returns
+        -------
+        Dict[str, Any]
+            The state object, either from a specific run or, when `run_id` is `None`
+            the state of the settlement when the BSX archive was created.
+        '''
+        
+        state_file = 'state.json'
+        
+        if run_id is not None:
+            state_file = f'{self._id_to_filesystem_name(run_id)}/{state_file}'
+        
+        return json.loads(self.bsx_archive.read(state_file))
+    
+    def get_directory_fragment(self) -> Dict[str, Any]:
+        '''
+        Returns the directory fragment object.
+        
+        Returns
+        -------
+        Dict[str, Any]
+            The directory fragment object.
+        '''
+        
+        directory_fragment_file = 'directory_fragment.yaml'
+        
+        return yaml.safe_load(self.bsx_archive.read(directory_fragment_file))
+    
+    def get_runs_metadata(self, named_runs_only:bool=False) -> Dict[str, Dict[str, Any]]:
+        '''
+        Returns the metadata for runs, keyed by run id. When `named_runs_only` is `True`,
+        only runs having a name are returned.
+        
+        Parameters
+        ----------
+        named_runs_only : bool, optional
+            When `True`, only runs having a name are returned, by default False
+        
+        Returns
+        -------
+        Dict[str, Dict[str, Any]]
+            The metadata for runs, keyed by run id.
+        '''
+        
+        runs_metadata = safepointer.get(self._state_at_export, select.runsById(), {})
+        
+        if named_runs_only:
+            runs_metadata = { id: runs_metadata[id] for id in runs_metadata if runs_metadata[id].get('description') is not None and runs_metadata[id].get('description') != '' }
+            
+        return runs_metadata
+    
+    @functools.lru_cache
+    def get_dynamics_metadata(self, run_id: str) -> Dict[str, Dict[str, Any]]:
+        '''
+        Returns the metadata for all dynamics in the specified run, keyed by dynamic id.
+        
+        Parameters
+        ----------
+        run_id : str
+            The id of the run to get dynamics metadata for.
             
         Returns
         -------
-        BsxArchive
-            A BsxArchive loaded from the specified file.
-        '''
-        return BsxArchive(zf.ZipFile(path))
-    
-    @staticmethod
-    def _get_state(bsx_archive: zf.ZipFile) -> Dict[str, Any]:
-        return json.loads(bsx_archive.read('state.json'))
-    
-    @staticmethod
-    def _get_settlement_id(state: Dict[str, Any]) -> str:
-        return safepointer.get(state, select.settlementName(), 'unnamed settlement')
-    
-    @staticmethod
-    def _get_all_runs_metadata(state: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
-        return safepointer.get(state, select.runsById(), {})
-    
-    @staticmethod
-    def _get_dynamics_metadata_from_state(state: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
-        allDynamicRefs: List[str] = safepointer.get(state, select.allDynamics(), {})
-        allDynamicMetadata = [ safepointer.get(state, dynamicRef, {}) for dynamicRef in allDynamicRefs ]
-        return dict(sorted({ dynamic['id']: dynamic for dynamic in allDynamicMetadata }.items()))
-    
-    def get_named_runs(self) -> Dict[str, Dict[str, Any]]:
-        '''
-        Returns the metadata for all runs that have a name assigned, keyed by run id.
-        
-        Returns
-        -------
         Dict[str, Dict[str, Any]]
-            The metadata for all runs that have a name assigned, keyed by run id.
+            The metadata for all dynamics in the specified run, keyed by dynamic id.
         '''
-        runs = self.runs_metadata
-        return { id: runs[id] for id in runs if runs[id].get('description') is not None and runs[id].get('description') != '' }
-    
-    def get_runs(self) -> Dict[str, Dict[str, Any]]:
-        '''
-        Returns the metadata for all runs, keyed by run id.
-        
-        Returns
-        -------
-        Dict[str, Dict[str, Any]]
-            The metadata for all runs, keyed by run id.
-        '''
-        return self.runs_metadata
-
-    @staticmethod
-    def _get_run_directories(bsx_archive: zf.ZipFile) -> List[zf.Path]:
-        return [ p for p in zf.Path(bsx_archive).iterdir() if p.is_dir() and p.name.startswith('RUN') ]
-
-    @staticmethod
-    def _get_dynamics_metadata_from_archive(bsx: zf.ZipFile, run_id: str) -> List[Dict[str, Any]]:
         
         # the folder name in the archive is the run id with colons replaced by underscores (to be a valid folder name on Windows)
-        run_directory_name = run_id.replace(':', '_')
+        run_directory_name = self._id_to_filesystem_name(run_id)
         
-        run_directories = BsxArchive._get_run_directories(bsx)
+        # [:-1] to remove trailing slash
+        run_directories = [ p.filename[:-1] for p in self.bsx_archive.infolist() if p.is_dir() and p.filename.startswith('RUN') ]
         
-        directory_matches = [ d for d in run_directories if d.name == run_directory_name ]
+        directory_matches = [ d for d in run_directories if d == run_directory_name ]
         if len(directory_matches) == 0:
             return []
         elif len(directory_matches) > 1:
@@ -142,28 +175,13 @@ class BsxArchive:
         
         run_directory = directory_matches[0]
         
-        dynamics_metadata = json.loads((run_directory / 'dynamics_metadata.json').read_bytes())
+        dynamics_metadata_file = f'{run_directory}/dynamics_metadata.json'
+        
+        dynamics_metadata = json.loads(self.bsx_archive.read(dynamics_metadata_file))
         
         return dynamics_metadata
     
-    def get_run_state(self, run_id: str) -> Dict[str, Any]:
-        '''
-        Returns the state of the specified run.
-        
-        Parameters
-        ----------
-        run_id : str
-            The id of the run to get the state of.
-        
-        Returns
-        -------
-        Dict[str, Any]
-            The state of the specified run.
-        '''
-        run_directory_name = run_id.replace(':', '_')
-        state_path = zf.Path(self.bsx_archive) / run_directory_name / 'state.json'
-        return json.loads(state_path.read_bytes())
-    
+    @functools.lru_cache
     def dynamic_timeseries_exists(self, run_id: str, dynamic_id: str) -> bool:
         '''
         Returns `True` if the specified dynamic exists in the specified run, `False` otherwise.
@@ -180,16 +198,20 @@ class BsxArchive:
         bool
             `True` if the specified dynamic exists in the specified run, `False` otherwise.
         '''
-        dynamics_metadata = BsxArchive._get_dynamics_metadata_from_archive(self.bsx_archive, run_id)
+        dynamics_metadata = self.get_dynamics_metadata(run_id)
         
         if dynamic_id not in [ dynamic['id'] for dynamic in dynamics_metadata ]:
             return False
         
-        run_directory_name = run_id.replace(':', '_')
-        dynamic_id_name = dynamic_id.replace(':', '_')
+        run_directory = self._id_to_filesystem_name(run_id)
+        dynamic_id_file = self._id_to_filesystem_name(dynamic_id)
         
-        timeseries_path = zf.Path(self.bsx_archive) / run_directory_name / 'dynamics_timeseries' / (dynamic_id_name + '.csv')
-        if not timeseries_path.exists() or not timeseries_path.is_file():
+        timeseries_path = f'{run_directory}/dynamics_timeseries/{dynamic_id_file}.csv'
+        
+        try:
+            if self.bsx_archive.getinfo(timeseries_path).is_dir():
+                return False
+        except KeyError:
             return False
         
         return True
@@ -218,21 +240,26 @@ class BsxArchive:
         DynamicTimeseriesParsingError
             If the timeseries file for the specified dynamic could not be parsed.
         '''
-        run_directory_name = run_id.replace(':', '_')
-        dynamic_id_name = dynamic_id.replace(':', '_')
+        run_directory = self._id_to_filesystem_name(run_id)
+        dynamic_id_file = self._id_to_filesystem_name(dynamic_id)
         
-        timeseries_path = zf.Path(self.bsx_archive) / run_directory_name / 'dynamics_timeseries' / (dynamic_id_name + '.csv')
+        timeseries_path = f'{run_directory}/dynamics_timeseries/{dynamic_id_file}.csv'
         
-        if not timeseries_path.exists() or not timeseries_path.is_file():
-            raise DynamicTimeseriesNotFoundError(run_id, dynamic_id)
         try:
-            df = pd.read_csv(timeseries_path.open(), header=0)
-            column_names = ['Timestep'] + [str(i) for i in range(len(df.columns) - 1)]
-            df.columns = column_names
             
-            df['Time'] = pd.to_datetime(df['Timestep'], unit='s')
-            df.set_index('Time', inplace=True)
-        except pd.errors.EmptyDataError as e:
-            raise DynamicTimseriesParsingError(run_id, dynamic_id) from e
+            with self.bsx_archive.open(timeseries_path) as f:
+            
+                try:
+                    df = pd.read_csv(f, header=0)
+                    column_names = ['Timestep'] + [str(i) for i in range(len(df.columns) - 1)]
+                    df.columns = column_names
+                    
+                    df['Time'] = pd.to_datetime(df['Timestep'], unit='s')
+                    df.set_index('Time', inplace=True)
+                    return df
+                
+                except pd.errors.EmptyDataError as e:
+                    raise DynamicTimseriesParsingError(run_id, dynamic_id) from e
         
-        return df
+        except KeyError as e:
+            raise DynamicTimeseriesNotFoundError(run_id, dynamic_id) from e

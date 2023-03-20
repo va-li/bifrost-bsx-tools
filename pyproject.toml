@@ -21,6 +21,7 @@ classifiers = [
 dependencies = [
     "bifrost_common_py",
     "pandas",
+    "pyyaml",
 ]
 keywords = ["bifrost", "bsx"]
 
