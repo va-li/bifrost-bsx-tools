@@ -26,6 +26,6 @@ dependencies = [
 keywords = ["bifrost", "bsx"]
 
 [project.urls]
-"Homepage" = "https://github.com/vali/bifrost-bsx-tools"
-"Bug Tracker" = "https://github.com/vali/bifrost-bsx-tools/issues"
+"Homepage" = "https://github.com/va-li/bifrost-bsx-tools"
+"Bug Tracker" = "https://github.com/va-li/bifrost-bsx-tools/issues"
 "Bifrost" = "http://bifrost.siemens.com"
