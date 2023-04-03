@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bifrost_bsx_tools"
-version = "0.0.1"
+version = "0.0.2"
 authors = [
   { name="Valentin Bauer", email="valentin.bauer@tuwien.ac.at" },
 ]
@@ -26,6 +26,6 @@ dependencies = [
 keywords = ["bifrost", "bsx"]
 
 [project.urls]
-"Homepage" = "https://github.com/vali/bifrost-bsx-tools"
-"Bug Tracker" = "https://github.com/vali/bifrost-bsx-tools/issues"
+"Homepage" = "https://github.com/va-li/bifrost-bsx-tools"
+"Bug Tracker" = "https://github.com/va-li/bifrost-bsx-tools/issues"
 "Bifrost" = "http://bifrost.siemens.com"
