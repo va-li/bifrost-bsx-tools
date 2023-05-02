@@ -251,11 +251,35 @@ class BsxArchive:
             
                 try:
                     df = pd.read_csv(f, header=0)
-                    column_names = ['Timestep'] + [str(i) for i in range(len(df.columns) - 1)]
-                    df.columns = column_names
                     
+                    # rename the columns to keep only the index in the name
+                    pattern = r".*_(?P<idx>\d+)"
+                    replace = lambda m: m.group('idx')
+                    
+                    # replace the column names with the index
+                    df.columns = df.columns.str.replace(pattern, replace, regex=True)
+                    
+                    # rename the timestep column
+                    df.rename(columns={'SimulationTime[s]': 'Timestep'}, inplace=True)
                     df['Time'] = pd.to_datetime(df['Timestep'], unit='s')
                     df.set_index('Time', inplace=True)
+                    
+                    # sort the columns by their index
+                    # but the columns are strings so we need to convert to int first
+                    # but some columns are not integers, so we need to handle that
+                    
+                    # first, get the columns that are not integers
+                    non_integer_columns = [ c for c in df.columns if not c.isdigit() ]
+                    
+                    # then, get the columns that are integers
+                    integer_columns = [ c for c in df.columns if c.isdigit() ]
+                    
+                    # then, sort the integer columns
+                    integer_columns = sorted(integer_columns, key=lambda c: int(c))
+                    
+                    # then, put the columns back together
+                    df = df[non_integer_columns + integer_columns]
+                    
                     return df
                 
                 except pd.errors.EmptyDataError as e:
