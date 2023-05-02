@@ -252,15 +252,20 @@ class BsxArchive:
                 try:
                     df = pd.read_csv(f, header=0)
                     
-                    # rename the columns to keep only the index in the name
-                    pattern = r".*_(?P<idx>\d+)"
-                    replace = lambda m: m.group('idx')
-                    
-                    # replace the column names with the index
-                    df.columns = df.columns.str.replace(pattern, replace, regex=True)
-                    
                     # rename the timestep column
                     df.rename(columns={'SimulationTime[s]': 'Timestep'}, inplace=True)
+                    
+                    # if there are more than two columns, then the dynamic is an array
+                    if len(df.columns) > 2:
+                        # rename the columns to keep only the index in the name
+                        pattern = r".*_(?P<idx>\d+)"
+                        replace = lambda m: m.group('idx')
+                        
+                        # replace the column names with the index
+                        df.columns = df.columns.str.replace(pattern, replace, regex=True)
+                    else:
+                        df.columns = ['Timestep', '0']
+                        
                     df['Time'] = pd.to_datetime(df['Timestep'], unit='s')
                     df.set_index('Time', inplace=True)
                     
